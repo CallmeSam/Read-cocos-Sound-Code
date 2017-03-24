@@ -252,3 +252,114 @@ bool _updateHashLocked;
 		_updateHashLocked        ========>  _hashForUpdates
 在不能直接移除时候需要做上标记，等下一时刻移除
 
+
+Scheduler::update()
+主要分三个类型：
+void Scheduler::schedule(const ccSchedulerFunc& callback, void *target, float interval, unsigned int repeat, float delay, bool paused, const std::string& key)
+{
+    CCASSERT(target, "Argument target must be non-nullptr");
+    CCASSERT(!key.empty(), "key should not be empty!");
+
+    tHashTimerEntry *element = nullptr;
+    HASH_FIND_PTR(_hashForTimers, &target, element);
+
+    if (! element)
+    {
+        element = (tHashTimerEntry *)calloc(sizeof(*element), 1);
+        element->target = target;
+
+        HASH_ADD_PTR(_hashForTimers, target, element);
+
+        // Is this the 1st element ? Then set the pause level to all the selectors of this target
+        element->paused = paused;
+    }
+    else
+    {
+        CCASSERT(element->paused == paused, "element's paused should be paused!");
+    }
+
+    if (element->timers == nullptr)
+    {
+        element->timers = ccArrayNew(10);
+    }
+    else 
+    {
+        for (int i = 0; i < element->timers->num; ++i)
+        {
+            TimerTargetCallback *timer = dynamic_cast<TimerTargetCallback*>(element->timers->arr[i]);
+
+            if (timer && key == timer->getKey())
+            {
+                CCLOG("CCScheduler#scheduleSelector. Selector already scheduled. Updating interval from: %.4f to %.4f", timer->getInterval(), interval);
+                timer->setInterval(interval);
+                return;
+            }        
+        }
+        ccArrayEnsureExtraCapacity(element->timers, 1);
+    }
+
+    TimerTargetCallback *timer = new (std::nothrow) TimerTargetCallback();
+    timer->initWithCallback(this, callback, target, key, interval, repeat, delay);
+    ccArrayAppendObject(element->timers, timer);
+    timer->release();
+}
+
+
+void Scheduler::schedule(SEL_SCHEDULE selector, Ref *target, float interval, unsigned int repeat, float delay, bool paused)
+{
+    CCASSERT(target, "Argument target must be non-nullptr");
+    
+    tHashTimerEntry *element = nullptr;
+    HASH_FIND_PTR(_hashForTimers, &target, element);
+    
+    if (! element)
+    {
+        element = (tHashTimerEntry *)calloc(sizeof(*element), 1);
+        element->target = target;
+        
+        HASH_ADD_PTR(_hashForTimers, target, element);
+        
+        // Is this the 1st element ? Then set the pause level to all the selectors of this target
+        element->paused = paused;
+    }
+    else
+    {
+        CCASSERT(element->paused == paused, "element's paused should be paused.");
+    }
+    
+    if (element->timers == nullptr)
+    {
+        element->timers = ccArrayNew(10);
+    }
+    else
+    {
+        for (int i = 0; i < element->timers->num; ++i)
+        {
+            TimerTargetSelector *timer = dynamic_cast<TimerTargetSelector*>(element->timers->arr[i]);
+            
+            if (timer && selector == timer->getSelector())
+            {
+                CCLOG("CCScheduler#scheduleSelector. Selector already scheduled. Updating interval from: %.4f to %.4f", timer->getInterval(), interval);
+                timer->setInterval(interval);
+                return;
+            }
+        }
+        ccArrayEnsureExtraCapacity(element->timers, 1);
+    }
+    
+    TimerTargetSelector *timer = new (std::nothrow) TimerTargetSelector();
+    timer->initWithSelector(this, selector, target, interval, repeat, delay);
+    ccArrayAppendObject(element->timers, timer);
+    timer->release();
+}
+
+template <class T>
+void scheduleUpdate(T *target, int priority, bool paused)
+{
+    this->schedulePerFrame([target](float dt){
+        target->update(dt);
+    }, target, priority, paused);
+}
+
+
+
