@@ -23,7 +23,7 @@ uthash
 
 构造函数。
 析构函数：
-	移除所有计时器
+    移除所有计时器
 
 void Scheduler::unscheduleAllWithMinPriority(int minPriority)
 {
@@ -96,7 +96,7 @@ void Scheduler::unscheduleAllForTarget(void *target)
         if (ccArrayContainsObject(element->timers, element->currentTimer)
             && (! element->currentTimerSalvaged))
         {
-        	  //自己理解：当前timer不能直接移除掉，但是要做好标记
+              //自己理解：当前timer不能直接移除掉，但是要做好标记
             element->currentTimer->retain();
             element->currentTimerSalvaged = true;
         }
@@ -110,7 +110,7 @@ void Scheduler::unscheduleAllForTarget(void *target)
         }
         else
         {
-        	  //若不是当前目标，则直接移除
+              //若不是当前目标，则直接移除
             removeHashElement(element);
         }
     }
@@ -233,27 +233,27 @@ void unschedule(SEL_SCHEDULE selector, Ref *target)
 
 
 记录schedule的容器分两类：
-		 struct _hashUpdateEntry *_hashForUpdates;	//对应的是update每帧
-		 struct _hashSelectorEntry *_hashForTimers;  	//对应的是有interval的
+         struct _hashUpdateEntry *_hashForUpdates;  //对应的是update每帧
+         struct _hashSelectorEntry *_hashForTimers;     //对应的是有interval的
 
 
 struct _listEntry *_updatesNegList;        // list of priority < 0
 struct _listEntry *_updates0List;            // list priority == 0
 struct _listEntry *_updatesPosList;        // list priority > 0
 这三个链表对应的应该是存储了：
-	优先级  大于０、等于０、小于０的＿hashUpdateEntry?
-	这三个数据应该是和_hashForUpdates同步的
+    优先级  大于０、等于０、小于０的＿hashUpdateEntry?
+    这三个数据应该是和_hashForUpdates同步的
 
 bool _currentTargetSalvaged;
 // If true unschedule will not remove anything from a hash. Elements will only be marked for deletion.
 bool _updateHashLocked;
 这两个标记对应的应是：
-		_currentTargetSalvaged ========>  _hashForTimers
-		_updateHashLocked        ========>  _hashForUpdates
+        _currentTargetSalvaged ========>  _hashForTimers
+        _updateHashLocked        ========>  _hashForUpdates
 在不能直接移除时候需要做上标记，等下一时刻移除
 
 
-Scheduler::update()
+Scheduler::schedule()
 主要分三个类型：
 void Scheduler::schedule(const ccSchedulerFunc& callback, void *target, float interval, unsigned int repeat, float delay, bool paused, const std::string& key)
 {
@@ -265,6 +265,8 @@ void Scheduler::schedule(const ccSchedulerFunc& callback, void *target, float in
 
     if (! element)
     {
+        //calloc(numElements ，sizeOfElement)
+        //这种写法不是很懂？？
         element = (tHashTimerEntry *)calloc(sizeof(*element), 1);
         element->target = target;
 
@@ -275,15 +277,21 @@ void Scheduler::schedule(const ccSchedulerFunc& callback, void *target, float in
     }
     else
     {
+        //？？
         CCASSERT(element->paused == paused, "element's paused should be paused!");
     }
 
+    //该元素中是否有计时器
+    //没有则申请10个空间
+    
+    
     if (element->timers == nullptr)
     {
         element->timers = ccArrayNew(10);
     }
     else 
     {
+        //如果有且计时器的key相同，则将interval改变，并跳出
         for (int i = 0; i < element->timers->num; ++i)
         {
             TimerTargetCallback *timer = dynamic_cast<TimerTargetCallback*>(element->timers->arr[i]);
@@ -295,63 +303,32 @@ void Scheduler::schedule(const ccSchedulerFunc& callback, void *target, float in
                 return;
             }        
         }
+        //没有key则多添加一个额外空间
+        //当timers容量不够时候，会讲timers的容量扩充到两倍
         ccArrayEnsureExtraCapacity(element->timers, 1);
     }
-
+    //new一个timerTargetCallback对象初始化并添加在该element的timers中
     TimerTargetCallback *timer = new (std::nothrow) TimerTargetCallback();
     timer->initWithCallback(this, callback, target, key, interval, repeat, delay);
+    //相当于pushback，同时retain了一下
     ccArrayAppendObject(element->timers, timer);
     timer->release();
 }
 
+//和上述基本相同，只是在有关TimerTargetCallback一类之时变为了TimerTargetSelector
+void Scheduler::schedule(SEL_SCHEDULE selector, Ref *target, float interval, unsigned int repeat, float delay, bool paused);
 
-void Scheduler::schedule(SEL_SCHEDULE selector, Ref *target, float interval, unsigned int repeat, float delay, bool paused)
+
+bool TimerTargetSelector::initWithSelector(Scheduler* scheduler, SEL_SCHEDULE selector, Ref* target, float seconds, unsigned int repeat, float delay)
 {
-    CCASSERT(target, "Argument target must be non-nullptr");
-    
-    tHashTimerEntry *element = nullptr;
-    HASH_FIND_PTR(_hashForTimers, &target, element);
-    
-    if (! element)
-    {
-        element = (tHashTimerEntry *)calloc(sizeof(*element), 1);
-        element->target = target;
-        
-        HASH_ADD_PTR(_hashForTimers, target, element);
-        
-        // Is this the 1st element ? Then set the pause level to all the selectors of this target
-        element->paused = paused;
-    }
-    else
-    {
-        CCASSERT(element->paused == paused, "element's paused should be paused.");
-    }
-    
-    if (element->timers == nullptr)
-    {
-        element->timers = ccArrayNew(10);
-    }
-    else
-    {
-        for (int i = 0; i < element->timers->num; ++i)
-        {
-            TimerTargetSelector *timer = dynamic_cast<TimerTargetSelector*>(element->timers->arr[i]);
-            
-            if (timer && selector == timer->getSelector())
-            {
-                CCLOG("CCScheduler#scheduleSelector. Selector already scheduled. Updating interval from: %.4f to %.4f", timer->getInterval(), interval);
-                timer->setInterval(interval);
-                return;
-            }
-        }
-        ccArrayEnsureExtraCapacity(element->timers, 1);
-    }
-    
-    TimerTargetSelector *timer = new (std::nothrow) TimerTargetSelector();
-    timer->initWithSelector(this, selector, target, interval, repeat, delay);
-    ccArrayAppendObject(element->timers, timer);
-    timer->release();
+    _scheduler = scheduler;
+    _target = target;
+    _selector = selector;
+    //基本都是一些参数的赋值，看timer再说
+    setupTimerWithInterval(seconds, repeat, delay);
+    return true;
 }
+
 
 template <class T>
 void scheduleUpdate(T *target, int priority, bool paused)
@@ -361,5 +338,299 @@ void scheduleUpdate(T *target, int priority, bool paused)
     }, target, priority, paused);
 }
 
+void Scheduler::schedulePerFrame(const ccSchedulerFunc& callback, void *target, int priority, bool paused)
+{
+    tHashUpdateEntry *hashElement = nullptr;
+    HASH_FIND_PTR(_hashForUpdates, &target, hashElement);
+    //这一块的逻辑并不是很懂？？
+    if (hashElement)
+    {
+        // check if priority has changed
+        //如果优先级改变了
+        if ((*hashElement->list)->priority != priority)
+        {
+            //且上锁状态则不会被标记移除，pause会赋值？？
+            if (_updateHashLocked)
+            {
+                CCLOG("warning: you CANNOT change update priority in scheduled function");
+                hashElement->entry->markedForDeletion = false;
+                hashElement->entry->paused = paused;
+                return;
+            }
+            else
+            {
+                // will be added again outside if (hashElement).
+                //会被移除，注释说会被再次添加
+                unscheduleUpdate(target);
+            }
+        }
+        else
+        {
+            hashElement->entry->markedForDeletion = false;
+            hashElement->entry->paused = paused;
+            return;
+        }
+    }
+
+    // most of the updates are going to be 0, that's way there
+    // is an special list for updates with priority 0
+    if (priority == 0)
+    {
+        appendIn(&_updates0List, callback, target, paused);
+    }
+    else if (priority < 0)
+    {
+        priorityIn(&_updatesNegList, callback, target, priority, paused);
+    }
+    else
+    {
+        // priority > 0
+        priorityIn(&_updatesPosList, callback, target, priority, paused);
+    }
+}
+
+void Scheduler::appendIn(_listEntry **list, const ccSchedulerFunc& callback, void *target, bool paused)
+{
+    //创建一个tListEntry对象，并根据参数赋值，添加到对应的优先级list中
+    tListEntry *listElement = new tListEntry();
+
+    listElement->callback = callback;
+    listElement->target = target;
+    listElement->paused = paused;
+    listElement->priority = 0;
+    listElement->markedForDeletion = false;
+
+    DL_APPEND(*list, listElement);
+
+    // update hash entry for quicker access
+    //在创建一个tHashUpdateEntry对象并添加到_hashForUpdates中
+    tHashUpdateEntry *hashElement = (tHashUpdateEntry *)calloc(sizeof(*hashElement), 1);
+    hashElement->target = target;
+    hashElement->list = list;
+    hashElement->entry = listElement;
+    HASH_ADD_PTR(_hashForUpdates, target, hashElement);
+}
+
+//只不过不上一个函数多了一个排序逻辑
+void Scheduler::priorityIn(tListEntry **list, const ccSchedulerFunc& callback, void *target, int priority, bool paused)
+{
+    //创建一个tListEntry并进行初始赋值
+    tListEntry *listElement = new tListEntry();
+
+    listElement->callback = callback;
+    listElement->target = target;
+    listElement->priority = priority;
+    listElement->paused = paused;
+    listElement->next = listElement->prev = nullptr;
+    listElement->markedForDeletion = false;
+
+    // empty list ?
+    //如果列表若空则直接插入
+    if (! *list)
+    {
+        DL_APPEND(*list, listElement);
+    }
+    else
+    {
+        bool added = false;
+
+        //不为空，是否优先级最小，是则pushfront
+        for (tListEntry *element = *list; element; element = element->next)
+        {
+            if (priority < element->priority)
+            {
+                if (element == *list)
+                {
+                    DL_PREPEND(*list, listElement);
+                }
+                else
+                {
+                    //优先级是否有小于列表中元素的优先级，有则插入
+                    listElement->next = element;
+                    listElement->prev = element->prev;
+
+                    element->prev->next = listElement;
+                    element->prev = listElement;
+                }
+
+                added = true;
+                break;
+            }
+        }
+
+        // Not added? priority has the higher value. Append it.
+        //优先级是否最大，是则直接pushback
+        if (! added)
+        {
+            DL_APPEND(*list, listElement);
+        }
+    }
+
+    // update hash entry for quick access
+    //同样的最后在放入_hashForUpdates中
+    tHashUpdateEntry *hashElement = (tHashUpdateEntry *)calloc(sizeof(*hashElement), 1);
+    hashElement->target = target;
+    hashElement->list = list;
+    hashElement->entry = listElement;
+    HASH_ADD_PTR(_hashForUpdates, target, hashElement);
+}
 
 
+//关键的update
+// main loop
+//dt究竟是什么意思等看了director之后再探讨
+void Scheduler::update(float dt)
+{
+    //？？
+    _updateHashLocked = true;
+
+    if (_timeScale != 1.0f)
+    {
+        dt *= _timeScale;
+    }
+
+    //
+    // Selector callbacks
+    //
+
+    // Iterate over all the Updates' selectors
+    tListEntry *entry, *tmp;
+
+    // updates with priority < 0
+    DL_FOREACH_SAFE(_updatesNegList, entry, tmp)
+    {
+        if ((! entry->paused) && (! entry->markedForDeletion))
+        {
+            entry->callback(dt);
+        }
+    }
+
+    // updates with priority == 0
+    //遍历_
+    DL_FOREACH_SAFE(_updates0List, entry, tmp)
+    {
+        if ((! entry->paused) && (! entry->markedForDeletion))
+        {
+            entry->callback(dt);
+        }
+    }
+
+    // updates with priority > 0
+    DL_FOREACH_SAFE(_updatesPosList, entry, tmp)
+    {
+        if ((! entry->paused) && (! entry->markedForDeletion))
+        {
+            entry->callback(dt);
+        }
+    }
+
+    // Iterate over all the custom selectors
+    for (tHashTimerEntry *elt = _hashForTimers; elt != nullptr; )
+    {
+        _currentTarget = elt;
+        _currentTargetSalvaged = false;
+
+        if (! _currentTarget->paused)
+        {
+            // The 'timers' array may change while inside this loop
+            for (elt->timerIndex = 0; elt->timerIndex < elt->timers->num; ++(elt->timerIndex))
+            {
+                elt->currentTimer = (Timer*)(elt->timers->arr[elt->timerIndex]);
+                elt->currentTimerSalvaged = false;
+
+                elt->currentTimer->update(dt);
+
+                if (elt->currentTimerSalvaged)
+                {
+                    // The currentTimer told the remove itself. To prevent the timer from
+                    // accidentally deallocating itself before finishing its step, we retained
+                    // it. Now that step is done, it's safe to release it.
+                    elt->currentTimer->release();
+                }
+
+                elt->currentTimer = nullptr;
+            }
+        }
+
+        // elt, at this moment, is still valid
+        // so it is safe to ask this here (issue #490)
+        elt = (tHashTimerEntry *)elt->hh.next;
+
+        // only delete currentTarget if no actions were scheduled during the cycle (issue #481)
+        if (_currentTargetSalvaged && _currentTarget->timers->num == 0)
+        {
+            removeHashElement(_currentTarget);
+        }
+    }
+
+    // delete all updates that are marked for deletion
+    // updates with priority < 0
+    DL_FOREACH_SAFE(_updatesNegList, entry, tmp)
+    {
+        if (entry->markedForDeletion)
+        {
+            this->removeUpdateFromHash(entry);
+        }
+    }
+
+    // updates with priority == 0
+    DL_FOREACH_SAFE(_updates0List, entry, tmp)
+    {
+        if (entry->markedForDeletion)
+        {
+            this->removeUpdateFromHash(entry);
+        }
+    }
+
+    // updates with priority > 0
+    DL_FOREACH_SAFE(_updatesPosList, entry, tmp)
+    {
+        if (entry->markedForDeletion)
+        {
+            this->removeUpdateFromHash(entry);
+        }
+    }
+
+    _updateHashLocked = false;
+    _currentTarget = nullptr;
+
+#if CC_ENABLE_SCRIPT_BINDING
+    //
+    // Script callbacks
+    //
+
+    // Iterate over all the script callbacks
+    if (!_scriptHandlerEntries.empty())
+    {
+        for (auto i = _scriptHandlerEntries.size() - 1; i >= 0; i--)
+        {
+            SchedulerScriptHandlerEntry* eachEntry = _scriptHandlerEntries.at(i);
+            if (eachEntry->isMarkedForDeletion())
+            {
+                _scriptHandlerEntries.erase(i);
+            }
+            else if (!eachEntry->isPaused())
+            {
+                eachEntry->getTimer()->update(dt);
+            }
+        }
+    }
+#endif
+    //
+    // Functions allocated from another thread
+    //
+
+    // Testing size is faster than locking / unlocking.
+    // And almost never there will be functions scheduled to be called.
+    if( !_functionsToPerform.empty() ) {
+        _performMutex.lock();
+        // fixed #4123: Save the callback functions, they must be invoked after '_performMutex.unlock()', otherwise if new functions are added in callback, it will cause thread deadlock.
+        auto temp = _functionsToPerform;
+        _functionsToPerform.clear();
+        _performMutex.unlock();
+        for( const auto &function : temp ) {
+            function();
+        }
+        
+    }
+}
