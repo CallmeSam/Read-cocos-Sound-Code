@@ -493,6 +493,7 @@ void Scheduler::update(float dt)
     // Selector callbacks
     //
 
+    //遍历所有的_updateList,并执行它们的callback函数
     // Iterate over all the Updates' selectors
     tListEntry *entry, *tmp;
 
@@ -506,7 +507,6 @@ void Scheduler::update(float dt)
     }
 
     // updates with priority == 0
-    //遍历_
     DL_FOREACH_SAFE(_updates0List, entry, tmp)
     {
         if ((! entry->paused) && (! entry->markedForDeletion))
@@ -525,14 +525,17 @@ void Scheduler::update(float dt)
     }
 
     // Iterate over all the custom selectors
+    //遍历_hashForTimers
     for (tHashTimerEntry *elt = _hashForTimers; elt != nullptr; )
     {
         _currentTarget = elt;
+        //至于何时这个能变为true？ 感到疑惑
         _currentTargetSalvaged = false;
-
+        //如果当前不是出于暂停状态
         if (! _currentTarget->paused)
         {
             // The 'timers' array may change while inside this loop
+            //遍历其中的timer，并执行update，如果被标记移除那么在update之后就可以进行release
             for (elt->timerIndex = 0; elt->timerIndex < elt->timers->num; ++(elt->timerIndex))
             {
                 elt->currentTimer = (Timer*)(elt->timers->arr[elt->timerIndex]);
@@ -557,6 +560,7 @@ void Scheduler::update(float dt)
         elt = (tHashTimerEntry *)elt->hh.next;
 
         // only delete currentTarget if no actions were scheduled during the cycle (issue #481)
+        //当这个target被标记为回收，同时timers的数量为0则移除该element
         if (_currentTargetSalvaged && _currentTarget->timers->num == 0)
         {
             removeHashElement(_currentTarget);
@@ -565,6 +569,7 @@ void Scheduler::update(float dt)
 
     // delete all updates that are marked for deletion
     // updates with priority < 0
+    //下方就是对update的List进行移除
     DL_FOREACH_SAFE(_updatesNegList, entry, tmp)
     {
         if (entry->markedForDeletion)
@@ -622,6 +627,8 @@ void Scheduler::update(float dt)
 
     // Testing size is faster than locking / unlocking.
     // And almost never there will be functions scheduled to be called.
+    //这个成员变量涉及到performFunctionInCocosThread()函数
+    //还未看！！！！
     if( !_functionsToPerform.empty() ) {
         _performMutex.lock();
         // fixed #4123: Save the callback functions, they must be invoked after '_performMutex.unlock()', otherwise if new functions are added in callback, it will cause thread deadlock.
@@ -634,3 +641,104 @@ void Scheduler::update(float dt)
         
     }
 }
+
+//先通过target找到_hashForTimers中的element,
+//再便利找到对应的selector，则返回true
+bool Scheduler::isScheduled(SEL_SCHEDULE selector, Ref *target)
+{
+    CCASSERT(selector, "Argument selector must be non-nullptr");
+    CCASSERT(target, "Argument target must be non-nullptr");
+    
+    tHashTimerEntry *element = nullptr;
+    HASH_FIND_PTR(_hashForTimers, &target, element);
+    
+    if (!element)
+    {
+        return false;
+    }
+    
+    if (element->timers == nullptr)
+    {
+        return false;
+    }
+    else
+    {
+        for (int i = 0; i < element->timers->num; ++i)
+        {
+            TimerTargetSelector *timer = dynamic_cast<TimerTargetSelector*>(element->timers->arr[i]);
+            
+            if (timer && selector == timer->getSelector())
+            {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    return false;  // should never get here
+}
+
+//有一点不懂，
+//下方逻辑是将_hashForTimers中的所有的元素都暂停了(是因为这个没有优先级，还是默认优先级很高？)
+//然后再对_updateHash中进行判断，根据优先级进行暂停
+std::set<void*> Scheduler::pauseAllTargetsWithMinPriority(int minPriority)
+{
+    std::set<void*> idsWithSelectors;
+
+    // Custom Selectors
+    for(tHashTimerEntry *element = _hashForTimers; element != nullptr;
+        element = (tHashTimerEntry*)element->hh.next)
+    {
+        element->paused = true;
+        idsWithSelectors.insert(element->target);
+    }
+
+    // Updates selectors
+    tListEntry *entry, *tmp;
+    if(minPriority < 0)
+    {
+        DL_FOREACH_SAFE( _updatesNegList, entry, tmp ) 
+        {
+            if(entry->priority >= minPriority)
+            {
+                entry->paused = true;
+                idsWithSelectors.insert(entry->target);
+            }
+        }
+    }
+
+    if(minPriority <= 0)
+    {
+        DL_FOREACH_SAFE( _updates0List, entry, tmp )
+        {
+            entry->paused = true;
+            idsWithSelectors.insert(entry->target);
+        }
+    }
+
+    DL_FOREACH_SAFE( _updatesPosList, entry, tmp ) 
+    {
+        if(entry->priority >= minPriority) 
+        {
+            entry->paused = true;
+            idsWithSelectors.insert(entry->target);
+        }
+    }
+
+    return idsWithSelectors;
+}
+
+///???
+void Scheduler::performFunctionInCocosThread(const std::function<void ()> &function)
+{
+    _performMutex.lock();
+
+    _functionsToPerform.push_back(function);
+
+    _performMutex.unlock();
+}
+
+
+//看完timer之后对两个进行整理
+
