@@ -517,3 +517,106 @@ bool Spawn::initWithTwoActions(FiniteTimeAction *action1, FiniteTimeAction *acti
 
     return ret;
 }
+
+-----------------------------------------------
+RotateTo
+继承：ActionInterval
+
+
+void RotateTo::calculateAngles(float &startAngle, float &diffAngle, float dstAngle)
+{
+    //先对初始角度求余
+    if (startAngle > 0)
+    {
+        startAngle = fmodf(startAngle, 360.0f);
+    }
+    else
+    {
+        startAngle = fmodf(startAngle, -360.0f);
+    }
+    //判断向什么方向旋转
+    //这里自我感觉cocos处理的不太周全，也应该对两个角度求一下余数
+    diffAngle = dstAngle - startAngle;
+    if (diffAngle > 180)
+    {
+        diffAngle -= 360;
+    }
+    if (diffAngle < -180)
+    {
+        diffAngle += 360;
+    }
+}
+
+void RotateTo::startWithTarget(Node *target)
+{
+    ActionInterval::startWithTarget(target);
+    
+    if (_is3D)
+    {
+        _startAngle = _target->getRotation3D();
+    }
+    else
+    {
+        _startAngle.x = _target->getRotationSkewX();
+        _startAngle.y = _target->getRotationSkewY();
+    }
+
+    calculateAngles(_startAngle.x, _diffAngle.x, _dstAngle.x);
+    calculateAngles(_startAngle.y, _diffAngle.y, _dstAngle.y);
+    calculateAngles(_startAngle.z, _diffAngle.z, _dstAngle.z);
+}
+
+void RotateTo::update(float time)
+{
+    if (_target)
+    {
+        if(_is3D)
+        {
+            _target->setRotation3D(Vec3(
+                _startAngle.x + _diffAngle.x * time,
+                _startAngle.y + _diffAngle.y * time,
+                _startAngle.z + _diffAngle.z * time
+            ));
+        }
+        else
+        {
+#if CC_USE_PHYSICS
+            if (_startAngle.x == _startAngle.y && _diffAngle.x == _diffAngle.y)
+            {
+                _target->setRotation(_startAngle.x + _diffAngle.x * time);
+            }
+            else
+            {
+                _target->setRotationSkewX(_startAngle.x + _diffAngle.x * time);
+                _target->setRotationSkewY(_startAngle.y + _diffAngle.y * time);
+            }
+#else
+            _target->setRotationSkewX(_startAngle.x + _diffAngle.x * time);
+            _target->setRotationSkewY(_startAngle.y + _diffAngle.y * time);
+#endif // CC_USE_PHYSICS
+        }
+    }
+}
+
+--------------------------------------------------
+RotateBy
+继承：ActionInterval
+//反向旋转
+RotateBy* RotateBy::reverse() const
+{
+    if(_is3D)
+    {
+        Vec3 v;
+        v.x = - _deltaAngle.x;
+        v.y = - _deltaAngle.y;
+        v.z = - _deltaAngle.z;
+        return RotateBy::create(_duration, v);
+    }
+    else
+    {
+        return RotateBy::create(_duration, -_deltaAngle.x, -_deltaAngle.y);
+    }
+}
+
+--------------------------------------------------
+jumpBy
