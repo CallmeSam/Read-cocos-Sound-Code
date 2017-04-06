@@ -620,3 +620,229 @@ RotateBy* RotateBy::reverse() const
 
 --------------------------------------------------
 jumpBy
+继承：ActionInterval
+void JumpBy::update(float t)
+{
+    // parabolic jump (since v0.8.2)
+    if (_target)
+    {
+        //先求的此次跳跃进行百分比,也即抛物线此时的X坐标点
+        float frac = fmodf( t * _jumps, 1.0f );
+        //由抛物线公式可得
+        //http://superclass.me/archives/83
+        float y = _height * 4 * frac * (1 - frac);
+        y += _delta.y * t;
+
+        float x = _delta.x * t;
+#if CC_ENABLE_STACKABLE_ACTIONS
+        Vec2 currentPos = _target->getPosition();
+
+        Vec2 diff = currentPos - _previousPos;
+        _startPosition = diff + _startPosition;
+
+        Vec2 newPos = _startPosition + Vec2(x,y);
+        _target->setPosition(newPos);
+
+        _previousPos = newPos;
+#else
+        _target->setPosition(_startPosition + Vec2(x,y));
+#endif // !CC_ENABLE_STACKABLE_ACTIONS
+    }
+}
+
+JumpBy* JumpBy::reverse() const
+{
+    return JumpBy::create(_duration, Vec2(-_delta.x, -_delta.y),
+        _height, _jumps);
+}
+
+------------------------------------------------------
+jumpTo
+继承：jumpBy
+jumpTo的pos是destination，而jumpBy的pos是detal
+
+------------------------------------------------------
+Bezier
+继承：ActionInterval
+//下方是3阶贝塞尔曲线公式
+//http://www.html-js.com/article/1628
+static inline float bezierat( float a, float b, float c, float d, float t )
+{
+    return (powf(1-t,3) * a + 
+            3*t*(powf(1-t,2))*b + 
+            3*powf(t,2)*(1-t)*c +
+            powf(t,3)*d );
+}
+
+-----------------------------------------------------
+ScaleTo
+继承：ActionInterval
+ScaleBy
+继承：ScaleTo
+ScaleTo是从某一个比例成为另一个比例
+ScaleBy是在某个比例的基础上*倍数
+-----------------------------------------------------
+Blink
+继承：ActionInterval
+
+void Blink::stop()
+{
+    //在动画停止后将该节点恢复到之前的属性(是否可视)
+    if(NULL != _target)
+        _target->setVisible(_originalState);
+    ActionInterval::stop();
+}
+
+void Blink::update(float time)
+{
+    if (_target && ! isDone())
+    {
+        //一个周期的时间
+        float slice = 1.0f / _times;
+        //此刻是第几次blink
+        float m = fmodf(time, slice);
+        //一个周期两个阶段，一个是显示，一个是消失
+        _target->setVisible(m > slice / 2 ? true : false);
+    }
+}
+
+------------------------------------------------------------
+FadeTo
+继承：ActionInterval
+FadeIn
+FadeOut
+继承：FadeTo
+FadeIn是从当前透明度到255
+FadeOut是从当前透明度到0
+
+TintBy、TintTo同理
+------------------------------------------------------------
+DelayTime
+继承：ActionInterval
+啥都不干
+------------------------------------------------------------
+ReverseTime
+继承：ActionInterval
+
+void ReverseTime::update(float time)
+{
+    if (_other)
+    {
+        //动画倒着放
+        _other->update(1 - time);
+    }
+}
+
+Animate
+继承：ActionInterval
+成员变量
+_splitTimes;                        //将每帧播放的时间点存入该集合中
+_nextFrame;                         //下一帧
+_origFrame;                         //初始帧
+_currFrameIndex;                    //当前帧索引
+_executedLoops;                     //执行过的循环次数
+_animation;                         //执行的动画
+_frameDisplayedEvent;               // 
+AnimationFrame::DisplayedEventInfo _frameDisplayedEventInfo;    //
+
+
+bool Animate::initWithAnimation(Animation* animation)
+{
+    CCASSERT( animation!=nullptr, "Animate: argument Animation must be non-nullptr");
+
+    float singleDuration = animation->getDuration();
+    //初始化总时长
+    if ( ActionInterval::initWithDuration(singleDuration * animation->getLoops() ) )
+    {
+        _nextFrame = 0;
+        setAnimation(animation);
+        _origFrame = nullptr;
+        _executedLoops = 0;
+        //开辟空间
+        _splitTimes->reserve(animation->getFrames().size());
+
+        float accumUnitsOfTime = 0;
+        //得到的是perUnitDelay
+        float newUnitOfTimeValue = singleDuration / animation->getTotalDelayUnits();
+
+        auto& frames = animation->getFrames();
+
+        for (auto& frame : frames)
+        {
+            float value = (accumUnitsOfTime * newUnitOfTimeValue) / singleDuration;
+            accumUnitsOfTime += frame->getDelayUnits();
+            //记录下每帧播的时间点
+            _splitTimes->push_back(value);
+        }    
+        return true;
+    }
+    return false;
+}
+
+void Animate::startWithTarget(Node *target)
+{
+    ActionInterval::startWithTarget(target);
+    Sprite *sprite = static_cast<Sprite*>(target);
+
+    CC_SAFE_RELEASE(_origFrame);
+
+    //如果需要恢复初始帧
+    if (_animation->getRestoreOriginalFrame())
+    {
+        //获取该精灵的图片作为初始帧
+        _origFrame = sprite->getSpriteFrame();
+        _origFrame->retain();
+    }
+    _nextFrame = 0;
+    _executedLoops = 0;
+}
+
+void Animate::update(float t)
+{
+    // if t==1, ignore. Animation should finish with t==1
+    if( t < 1.0f ) {
+        t *= _animation->getLoops();
+
+        // new loop?  If so, reset frame counter
+        unsigned int loopNumber = (unsigned int)t;
+        if( loopNumber > _executedLoops ) {
+            _nextFrame = 0;
+            _executedLoops++;
+        }
+
+        // new t for animations
+        t = fmodf(t, 1.0f);
+    }
+
+    auto& frames = _animation->getFrames();
+    auto numberOfFrames = frames.size();
+    SpriteFrame *frameToDisplay = nullptr;
+
+    for( int i=_nextFrame; i < numberOfFrames; i++ ) {
+        float splitTime = _splitTimes->at(i);
+
+        if( splitTime <= t ) {
+            _currFrameIndex = i;
+            AnimationFrame* frame = frames.at(_currFrameIndex);
+            frameToDisplay = frame->getSpriteFrame();
+            static_cast<Sprite*>(_target)->setSpriteFrame(frameToDisplay);
+
+            const ValueMap& dict = frame->getUserInfo();
+            if ( !dict.empty() )
+            {
+                if (_frameDisplayedEvent == nullptr)
+                    _frameDisplayedEvent = new (std::nothrow) EventCustom(AnimationFrameDisplayedNotification);
+                
+                _frameDisplayedEventInfo.target = _target;
+                _frameDisplayedEventInfo.userInfo = &dict;
+                _frameDisplayedEvent->setUserData(&_frameDisplayedEventInfo);
+                Director::getInstance()->getEventDispatcher()->dispatchEvent(_frameDisplayedEvent);
+            }
+            _nextFrame = i+1;
+        }
+        // Issue 1438. Could be more than one frame per tick, due to low frame rate or frame delta < 1/FPS
+        else {
+            break;
+        }
+    }
+}
