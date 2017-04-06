@@ -805,26 +805,30 @@ void Animate::update(float t)
 
         // new loop?  If so, reset frame counter
         unsigned int loopNumber = (unsigned int)t;
+        //此刻循环的次数如果大于已经执行的循环次数则进行重置
         if( loopNumber > _executedLoops ) {
             _nextFrame = 0;
             _executedLoops++;
         }
 
         // new t for animations
+        //获得当前动画所占播放的进度
         t = fmodf(t, 1.0f);
     }
 
     auto& frames = _animation->getFrames();
     auto numberOfFrames = frames.size();
     SpriteFrame *frameToDisplay = nullptr;
-
+    //从下一帧开始，之所以用for循环是因为有可能连续播几帧
     for( int i=_nextFrame; i < numberOfFrames; i++ ) {
+        //获得对应帧的时间刻度
         float splitTime = _splitTimes->at(i);
-
+        //若当前的时间大于该刻度
         if( splitTime <= t ) {
             _currFrameIndex = i;
             AnimationFrame* frame = frames.at(_currFrameIndex);
             frameToDisplay = frame->getSpriteFrame();
+            //当前精灵改变材质
             static_cast<Sprite*>(_target)->setSpriteFrame(frameToDisplay);
 
             const ValueMap& dict = frame->getUserInfo();
@@ -836,6 +840,7 @@ void Animate::update(float t)
                 _frameDisplayedEventInfo.target = _target;
                 _frameDisplayedEventInfo.userInfo = &dict;
                 _frameDisplayedEvent->setUserData(&_frameDisplayedEventInfo);
+                //发布消息
                 Director::getInstance()->getEventDispatcher()->dispatchEvent(_frameDisplayedEvent);
             }
             _nextFrame = i+1;
@@ -846,3 +851,22 @@ void Animate::update(float t)
         }
     }
 }
+
+----------------------------------------------------------
+TargetAction
+继承：ActionInterval
+即_action->initWithTargetWith(_target)
+----------------------------------------------------------
+ActionFloat
+继承：ActionInterval
+//在duration时间内，float数从from到to，并把参数带入到callback中并回调
+ActionFloat* ActionFloat::create(float duration, float from, float to, ActionFloatCallback callback);
+----------------------------------------------------------
+----------------------------------------------------------
+ActionInstant
+继承：FiniteTimeAction
+在调用update的时候跟参数无关，是直接完成
+
+
+
+
